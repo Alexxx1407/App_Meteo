@@ -3,6 +3,7 @@
 - [Project Structure](#-project-structure)
 - [Explanation of Files](#-Explanation-of-Files)
 - [Usage Instructions](#-Usage-Instructions)
+- [Dependencies](#-Dependencies)
 - [License](#-license)
 
 ---
@@ -77,5 +78,5 @@ fl_chart: For rendering temperature graphs.
 http: For making network requests to OpenWeatherMap API.
 flutter: The main framework for building the UI.
 
-**📝 License**
+## **📝 License**
 This project is licensed under the MIT License - see the LICENSE file for details.
