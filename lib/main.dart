@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
-import 'api_service.dart'; // Import API service functions
-import 'favorite_service.dart'; // Import favorite service functions
-import 'graph_widget.dart'; // Import the graph widget
-import 'weather_widget.dart'; // Import the weather display widget
+import 'dart:async'; // Import Timer
+import 'api_service.dart';
+import 'favorite_service.dart';
+import 'graph_widget.dart';
+import 'weather_widget.dart';
+import 'location_notification.dart';
 
-void main() {
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeNotifications(); // Initialize notifications when the app starts
   runApp(const MyApp());
 }
 
@@ -17,6 +22,7 @@ class MyApp extends StatelessWidget {
       title: 'Flutter Weather App',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF6A1B9A)),
+        scaffoldBackgroundColor: const Color(0xFFE1E8F3), // Softer background color
         useMaterial3: true,
       ),
       home: const MyHomePage(title: 'Weather App'),
@@ -41,39 +47,70 @@ class _MyHomePageState extends State<MyHomePage> {
   String weatherDescription = ''; // Weather condition description
   String weatherImage = ''; // Image path for weather condition
   List<double> temperatures = []; // Hourly temperature data for the graph
+  List<double> weeklyTemperatures = []; // Weekly temperature data for the graph
   bool citySearched = false; // Tracks if a city was searched
-  bool isCelsius = true; // Tracks whether temperature is shown in Celsius or Fahrenheit (ADDED THIS)
+  bool isCelsius = true; // Tracks whether temperature is shown in Celsius or Fahrenheit
+  bool showWeeklyButton = false; // Track whether to show "Get 5-Day Forecast" button
+
+  Timer? notificationTimer; // Timer for periodic notifications
+
+  @override
+  void dispose() {
+    notificationTimer?.cancel(); // Cancel the timer when the widget is disposed
+    super.dispose();
+  }
+
+  // Start the notification timer
+  void startNotificationTimer() {
+    notificationTimer = Timer.periodic(Duration(seconds: 10), (timer) async {
+      print('Sending periodic weather notification');
+      await sendLocationWeatherNotification(); // Trigger location-based weather notification
+    });
+  }
+
+  // Stop the notification timer
+  void stopNotificationTimer() {
+    notificationTimer?.cancel();
+    print('Stopped periodic notifications');
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFEDE7F6),
-      appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 242, 240, 243),
-        title: Text(widget.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-        elevation: 10,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.favorite, color: Color(0xFF6A1B9A)),
-            onPressed: () {
-              showFavoritesDialog(context); // Show favorites from favorite_service.dart
-            },
-          )
-        ],
-      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: <Widget>[
+            AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              title: Text(widget.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF6A1B9A))),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.favorite, color: Color(0xFF6A1B9A)),
+                  onPressed: () {
+                    showFavoritesDialog(context); // Show favorites from favorite_service.dart
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.notifications, color: Color(0xFF6A1B9A)),
+                  onPressed: () {
+                    sendLocationWeatherNotification(); // Trigger a one-time location-based weather notification
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
             // Search bar to search for city
             Card(
-              elevation: 5,
+              elevation: 8,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(15),
+                borderRadius: BorderRadius.circular(20),
               ),
+              shadowColor: Colors.grey.withOpacity(0.5),
               child: Padding(
-                padding: const EdgeInsets.all(8.0),
+                padding: const EdgeInsets.all(12.0),
                 child: Row(
                   children: [
                     Expanded(
@@ -84,12 +121,12 @@ class _MyHomePageState extends State<MyHomePage> {
                           });
                         },
                         decoration: InputDecoration(
-                          hintText: 'Search for a city',
-                          prefixIcon: const Icon(Icons.search),
+                          hintText: 'Enter city name',
+                          prefixIcon: const Icon(Icons.search, color: Color(0xFF6A1B9A)),
                           filled: true,
                           fillColor: Colors.white,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(15),
+                            borderRadius: BorderRadius.circular(20),
                             borderSide: BorderSide.none,
                           ),
                         ),
@@ -99,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       icon: const Icon(Icons.star_border, color: Color(0xFF6A1B9A)),
                       onPressed: () {
                         if (searchText.isNotEmpty) {
-                          saveFavoriteCity(searchText); // Save favorite city from favorite_service.dart
+                          saveFavoriteCity(searchText); // Save favorite city
                         }
                       },
                     ),
@@ -108,37 +145,88 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                if (searchText.isNotEmpty) {
-                  var weatherData = await fetchWeatherData(searchText);
-                  if (weatherData != null) {
-                    setState(() {
-                      weatherInfo = weatherData['weatherInfo'];
-                      temperatureCelsius = weatherData['temperatureCelsius'];
-                      weatherDescription = weatherData['weatherDescription'];
-                      weatherImage = weatherData['weatherImage'];
-                      temperatures = weatherData['temperatures'];
-                      location = weatherData['location'];
-                      citySearched = true;
-                    });
+            // Custom gradient button for "Get the Weather"
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF6A1B9A), Color(0xFF8E24AA)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 40),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                ),
+                onPressed: () async {
+                  if (searchText.isNotEmpty) {
+                    var weatherData = await fetchWeatherData(searchText);
+                    if (weatherData != null) {
+                      setState(() {
+                        weatherInfo = weatherData['weatherInfo'];
+                        temperatureCelsius = weatherData['temperatureCelsius'];
+                        weatherDescription = weatherData['weatherDescription'];
+                        weatherImage = weatherData['weatherImage'];
+                        temperatures = weatherData['temperatures'];
+                        location = weatherData['location'];
+                        citySearched = true;
+                        showWeeklyButton = true; // Enable 5-day forecast button
+                      });
+                    }
                   }
-                }
-              },
-              child: const Text('Get the Weather'),
+                },
+                child: const Text(
+                  'Get the Weather',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.white),
+                ),
+              ),
             ),
             const SizedBox(height: 20),
             // Display the weather widget (extracted to weather_widget.dart)
             if (citySearched)
-              WeatherWidget(
-                weatherInfo: weatherInfo,
-                weatherImage: weatherImage,
+              Card(
+                color: Colors.white,
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Text(
+                        weatherInfo,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF6A1B9A),
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      if (weatherImage.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          child: Image.asset(
+                            weatherImage,
+                            height: 120, // Adjusted height for better layout
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
                 if (citySearched) {
-                  showTemperatureGraphPopup(context, location, temperatures); // Show the graph in popup (from graph_widget.dart)
+                  showTemperatureGraphPopup(context, location, temperatures); // Show the hourly graph in a popup
                 } else {
                   showDialog(
                     context: context,
@@ -149,14 +237,57 @@ class _MyHomePageState extends State<MyHomePage> {
                   );
                 }
               },
-              child: const Text('Show Graph'),
+              child: const Text('Show Hourly Graph'),
             ),
+            const SizedBox(height: 20),
+            // New button for the 5-day forecast
+            if (showWeeklyButton)
+              ElevatedButton(
+                onPressed: () async {
+                  print('Fetching 5-day forecast for city: $searchText');  // Debug log
+                  var fiveDayData = await fetchFiveDayForecast(searchText); // Fetch 5-day forecast
+                  if (fiveDayData != null) {
+                    print('5-Day Temperatures: $fiveDayData'); // Debug log
+                    setState(() {
+                      weeklyTemperatures = fiveDayData; // Use the 5-day temperatures for the graph
+                    });
+                    showTemperatureGraphPopup(context, location, weeklyTemperatures); // Show 5-day data in the graph
+                  } else {
+                    print('Error: 5-day data not fetched'); // Debugging error
+                  }
+                },
+                child: const Text('Get 5-Day Forecast'),
+              ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
                 toggleTemperatureUnit();
               },
               child: const Text('Toggle C°/F°'),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    startNotificationTimer(); // Start the notification timer
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("Periodic notifications started")),
+                    );
+                  },
+                  child: const Text('Start Notifications'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    stopNotificationTimer(); // Stop the notification timer
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("Periodic notifications stopped")),
+                    );
+                  },
+                  child: const Text('Stop Notifications'),
+                ),
+              ],
             ),
           ],
         ),
@@ -174,7 +305,7 @@ class _MyHomePageState extends State<MyHomePage> {
         } else {
           weatherInfo = 'The weather in $location is: $weatherDescription, Temperature: ${temperatureCelsius?.toStringAsFixed(2)}°C';
         }
-        isCelsius = !isCelsius; // Toggle the unit
+        isCelsius = !isCelsius;
       }
     });
   }
